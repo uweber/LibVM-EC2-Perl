@@ -5,6 +5,7 @@ use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
+    AssumeRole                        => 'fetch_one,AssumeRoleResult,VM::EC2::Security::Token',
     GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::Token',
     GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
     );
@@ -76,13 +77,57 @@ See L<VM::EC2::Security::Token>, L<VM::EC2::Security::FederatedUser>,
 L<VM::EC2::Security::Credentials>, and L<VM::EC2::Security::Policy>.
 
 Implemented:
+ AssumeRole
  GetFederationToken
  GetSessionToken
 
 Unimplemented:
- (none)
+ AssumeRoleWithSAML
+ AssumeRoleWithWebIdentity
+ DecodeAuthorizationMessage
 
 =cut
+
+=head2 $token = $ec2->assume_role(-role_arn=>$role,-role_session_name=>$name,@args)
+
+This method creates a new set of temporary security credentials and
+returns a VM::EC2::Security::Token object, that you can use to access
+AWS resources that you might not normally have access to.
+
+=over 4
+
+=item Required arguments:
+
+ -role_arn          The Amazon Resource Name (ARN) of the role to assume.
+
+ -role_session_name An identifier for the assumed role session.
+
+=item Optional arguments:
+
+ -duration_seconds Length of time the session token will be valid for,
+                    expressed in seconds. Min 900, Max 3600.
+
+ -external_id      A unique identifier that is used by third parties
+                     when assuming roles in their customers' accounts.
+
+ -policy           A VM::EC2::Security::Policy object, or a JSON string
+                     complying with the IAM policy syntax.
+
+ -serial_number    The identification number of the user's MFA device,
+                     if any.
+
+ -token_code       The value provided by the MFA device.
+
+=back
+
+=cut
+
+sub assume_role {
+    my $self = shift;
+    my %args = @_;
+    my @p = map {$self->single_parm($_,\%args)} qw(DurationSeconds ExternalId Policy RoleArn RoleSessionName SerialNumber TokenCode);
+    return $self->sts_call('AssumeRole',@p);
+}
 
 =head2 $token = $ec2->get_federation_token($username)
 
