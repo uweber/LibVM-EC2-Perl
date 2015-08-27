@@ -576,6 +576,7 @@ eval "require AWS::Signature4"; # optional
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
 use POSIX 'strftime';
+use LWP::UserAgent;
 use URI;
 use URI::Escape;
 use AnyEvent;
@@ -1814,8 +1815,9 @@ or
 
 sub call {
     my $self = shift;
-    return $ASYNC ? $self->_call_async(@_) : $self->_call_sync(@_);
+    return $ASYNC ? $self->_call_async(@_) : $self->_call_sync_new(@_);
 }
+
 sub _call_sync {
     my $self = shift;
     my $cv   = $self->_call_async(@_);
@@ -1827,6 +1829,61 @@ sub _call_sync {
 	return @obj;
     } else {
 	return @obj;
+    }
+}
+
+# Copy of _call_sync and _call_async
+sub _call_sync_new {
+    my $self = shift;
+    my ($action,@param) = @_;
+
+    my $request = POST($self->endpoint,
+                       'content-type'=>'application/x-www-form-urlencoded',
+                       Content => [
+                           Action  => $action,
+                           Version => $self->version,
+                           @param
+                       ]);
+    my $access_key = $self->access_key;
+    my $secret_key = $self->secret;
+    my $host       = URI->new($self->endpoint)->host;
+    $request->header('x-amz-security-token'=>$self->security_token) if $self->security_token;
+    $request->header('user-agent' => 'VM::EC2-perl');
+    $request->header('action'     => $action);  # maybe not necessary, but docs say it is!
+    $request->header('host'       => $host);
+
+    AWS::Signature4->new(-access_key=>$access_key,
+                         -secret_key=>$secret_key)->sign($request);
+
+    my @obj = ();
+    my $resp = LWP::UserAgent->new->request( $request );
+    if ($resp->is_success) {
+	@obj = VM::EC2::Dispatch->content2objects($action,$resp->decoded_content,$self);
+        $self->error(undef);
+    }
+    else {
+        my $error = undef;
+        my $body = $resp->decoded_content;
+
+        if ($body =~ /<Response>/) {
+            $error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
+        } elsif ($body =~ /<ErrorResponse xmlns="http:\/\//) {
+           $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
+        } else {
+            my $code = $resp->code();
+            my $msg  = $body ? $body : $resp->message();
+            $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
+        }
+
+        $self->error($error);
+    }
+
+    if (!wantarray) { # scalar context
+        return $obj[0] if @obj == 1;
+        return         if @obj == 0;
+        return @obj;
+    } else {
+        return @obj;
     }
 }
 
