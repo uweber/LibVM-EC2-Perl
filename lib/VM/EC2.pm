@@ -780,6 +780,7 @@ sub new {
 	secret          => $secret,
 	security_token  => $token,
 	endpoint        => $endpoint_url,
+	dryrun		=> 0,
 	idempotent_seed => sha1_hex(rand()),
 	raise_error     => $raise_error,
 	print_error     => $print_error,
@@ -897,6 +898,23 @@ sub region {
     }
     return $current_region;
 }
+
+=head2 $ec2->dryrun($boolean)
+
+Set DryRun Mode. If enabled, checks whether you have the required
+permissions for the action, without actually making the request.
+If you have the required permissions, the request returns DryRunOperation;
+otherwise, it returns UnauthorizedOperation.
+
+=cut
+
+sub dryrun {
+    my $self = shift;
+    my $d    = $self->{dryrun};
+    $self->{dryrun} = shift if @_;
+    $d;
+}
+
 
 =head2 $ec2->raise_error($boolean)
 
@@ -1837,7 +1855,7 @@ sub _call_async {
     # called if AWS::Signature4 NOT present; use built-in method
     unless (AWS::Signature4->can('new')) {
 	my ($action,@param) = @_;
-	my $post  = $self->_signature(Action=>$action,@param);
+	my $post  = $self->_signature(Action=>$action,$self->dryrun?(DryRun=>"true"):(),@param);
 	my $u     = URI->new($self->endpoint);
 	$u->query_form(@$post);
 	return $self->async_post($action,POST($self->endpoint,Content=>$u->query));
@@ -1850,6 +1868,7 @@ sub _call_async {
 		       Content => [
 			   Action  => $action,
 			   Version => $self->version,
+			   $self->dryrun ? ( DryRun => "true" ) : (),
 			   @param
 		       ]);
     my $access_key = $self->access_key;
